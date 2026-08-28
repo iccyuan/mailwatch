@@ -190,7 +190,14 @@
       <span class="k">规则</span><span id="md-rule"></span>
     </div>
     <div id="md-deliv"></div>
-    <label style="margin-top:14px">正文</label>
+    <div class="row" style="margin-top:14px">
+      <label style="margin:0">正文</label>
+      <div class="viewtoggle" id="md-toggle" style="display:none">
+        <button class="btn on" id="md-btn-html" onclick="mailView('html')">原始样式</button>
+        <button class="btn" id="md-btn-text" onclick="mailView('text')">纯文本</button>
+      </div>
+    </div>
+    <iframe class="mailframe" id="md-html" sandbox="" style="display:none"></iframe>
     <pre class="mailbody" id="md-body"></pre>
     <div class="row" style="margin-top:16px;justify-content:flex-end">
       <button class="btn" onclick="document.getElementById('m-mail').classList.remove('open')">关闭</button>

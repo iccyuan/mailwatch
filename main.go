@@ -26,7 +26,7 @@ import (
 	"mailwatch/internal/watcher"
 )
 
-var version = "0.1.10"
+var version = "0.1.11"
 
 // App 持有当前配置与运行状态,是 admin.Backend 的实现。
 // Web 后台改配置后通过 reload 通道热重启监听。
@@ -107,7 +107,8 @@ func (a *App) handleMail(cfg *config.Config, ruleActions [][]action.Action, m *m
 	events.Add("info", "新邮件 [%s] UID=%d from=%s subject=%s", m.Mailbox, m.UID, m.FromAddr, m.Subject)
 	rec := &store.MailRecord{
 		ID: store.ID64(time.Now().UnixNano()), Time: time.Now(), UID: m.UID, Mailbox: m.Mailbox,
-		From: m.From, FromAddr: m.FromAddr, To: m.To, Subject: m.Subject, Body: m.Body,
+		From: m.From, FromAddr: m.FromAddr, To: m.To, Subject: m.Subject,
+		Body: m.Body, BodyHTML: m.HTMLBody,
 	}
 	if i := rules.FirstMatch(cfg.Rules, m); i >= 0 {
 		r := &cfg.Rules[i]

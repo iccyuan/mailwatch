@@ -122,8 +122,23 @@ async function openMail(id){try{
       → ${esc(x.target)} <span style="color:var(--dim)">(${x.action} · ${new Date(x.time).toLocaleString()})</span>
       ${x.error?'<div class="b-err" style="margin-top:4px">'+esc(x.error)+'</div>':''}</div>`).join('');
   $('md-body').textContent=r.body||'(无文本正文)';
+  if(r.body_html){
+    $('md-toggle').style.display='flex';
+    $('md-html').srcdoc=r.body_html;
+    mailView('html');
+  }else{
+    $('md-toggle').style.display='none';
+    mailView('text');
+  }
   $('m-mail').classList.add('open');
 }catch(e){toast(e.message,'err')}}
+function mailView(mode){
+  const isHtml=mode==='html';
+  $('md-html').style.display=isHtml?'block':'none';
+  $('md-body').style.display=isHtml?'none':'block';
+  $('md-btn-html').classList.toggle('on',isHtml);
+  $('md-btn-text').classList.toggle('on',!isHtml);
+}
 
 /* ---------- chips ---------- */
 function makeChips(container,values,validate){

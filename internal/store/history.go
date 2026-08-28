@@ -51,7 +51,8 @@ type MailRecord struct {
 	To       string         `json:"to"`
 	Subject  string         `json:"subject"`
 	Body     string         `json:"body"`
-	Rule     string         `json:"rule,omitempty"` // 命中的规则名,空=未命中
+	BodyHTML string         `json:"body_html,omitempty"` // HTML 正文,详情页渲染用
+	Rule     string         `json:"rule,omitempty"`      // 命中的规则名,空=未命中
 	Results  []ActionResult `json:"results,omitempty"`
 }
 
@@ -87,6 +88,9 @@ func LoadHistory(path string) *History {
 func (h *History) Add(r *MailRecord) {
 	if len(r.Body) > bodyCap {
 		r.Body = r.Body[:bodyCap] + "\n...(正文过长已截断)"
+	}
+	if len(r.BodyHTML) > 4*bodyCap {
+		r.BodyHTML = "" // HTML 过大就只留文本
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -150,6 +154,7 @@ func (h *History) List(offset, limit int, q, mailbox string) (total int, items [
 	for _, r := range filtered[offset:end] {
 		c := *r
 		c.Body = ""
+		c.BodyHTML = ""
 		items = append(items, &c)
 	}
 	if items == nil {
