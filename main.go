@@ -1,3 +1,5 @@
+// mailwatch — 多邮箱 IMAP 监听转发服务。
+// main 只负责装配:加载配置、构建 App、启动 Web 后台与监听调度。
 package main
 
 import (
@@ -13,19 +15,29 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"mailwatch/internal/action"
+	"mailwatch/internal/admin"
+	"mailwatch/internal/config"
+	"mailwatch/internal/events"
+	"mailwatch/internal/mail"
+	"mailwatch/internal/rules"
+	"mailwatch/internal/store"
+	"mailwatch/internal/watcher"
 )
 
-var version = "0.1.7"
+var version = "0.1.8"
 
-// App 持有当前配置与运行状态,Web 后台改配置后通过 reload 热重启监听。
+// App 持有当前配置与运行状态,是 admin.Backend 的实现。
+// Web 后台改配置后通过 reload 通道热重启监听。
 type App struct {
 	cfgPath string
-	state   *State
-	history *History
+	state   *store.State
+	history *store.History
 	startAt time.Time
 
 	mu  sync.Mutex
-	cfg *Config
+	cfg *config.Config
 
 	reload chan struct{}
 
@@ -33,41 +45,27 @@ type App struct {
 	connected map[string]bool // 各邮箱连接状态
 }
 
-func (a *App) setConnected(name string, v bool) {
-	a.connMu.Lock()
-	a.connected[name] = v
-	a.connMu.Unlock()
-}
+// ---- admin.Backend 实现 ----
 
-func (a *App) connSnapshot() map[string]bool {
-	a.connMu.Lock()
-	defer a.connMu.Unlock()
-	out := make(map[string]bool, len(a.connected))
-	for k, v := range a.connected {
-		out[k] = v
-	}
-	return out
-}
-
-func (a *App) Config() *Config {
+func (a *App) Config() *config.Config {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.cfg
 }
 
 // ApplyConfig 校验、落盘并热重载。
-func (a *App) ApplyConfig(cfg *Config) error {
+func (a *App) ApplyConfig(cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	// 每条规则的动作先组装一遍,配置错误在保存时就暴露
 	for i := range cfg.Rules {
-		if _, err := buildActions(cfg, &cfg.Rules[i]); err != nil {
+		if _, err := action.Build(cfg, &cfg.Rules[i]); err != nil {
 			return err
 		}
 	}
 	a.mu.Lock()
-	if err := SaveConfig(a.cfgPath, cfg); err != nil {
+	if err := config.Save(a.cfgPath, cfg); err != nil {
 		a.mu.Unlock()
 		return err
 	}
@@ -80,42 +78,62 @@ func (a *App) ApplyConfig(cfg *Config) error {
 	return nil
 }
 
+func (a *App) History() *store.History { return a.history }
+func (a *App) StartAt() time.Time      { return a.startAt }
+func (a *App) Version() string         { return version }
+
+func (a *App) Cursors() map[string]uint32 { return a.state.Snapshot() }
+
+func (a *App) ConnSnapshot() map[string]bool {
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+	out := make(map[string]bool, len(a.connected))
+	for k, v := range a.connected {
+		out[k] = v
+	}
+	return out
+}
+
+func (a *App) setConnected(name string, v bool) {
+	a.connMu.Lock()
+	a.connected[name] = v
+	a.connMu.Unlock()
+}
+
+// ---- 邮件处理与监听调度 ----
+
 // handleMail 按当前配置组装的规则处理一封邮件,并写入历史记录。
-func (a *App) handleMail(cfg *Config, ruleActions [][]Action, m *Mail) {
-	Ev.Add("info", "新邮件 UID=%d from=%s subject=%s", m.UID, m.FromAddr, m.Subject)
-	rec := &MailRecord{
+func (a *App) handleMail(cfg *config.Config, ruleActions [][]action.Action, m *mail.Mail) {
+	events.Add("info", "新邮件 [%s] UID=%d from=%s subject=%s", m.Mailbox, m.UID, m.FromAddr, m.Subject)
+	rec := &store.MailRecord{
 		ID: time.Now().UnixNano(), Time: time.Now(), UID: m.UID, Mailbox: m.Mailbox,
 		From: m.From, FromAddr: m.FromAddr, To: m.To, Subject: m.Subject, Body: m.Body,
 	}
-	for i := range cfg.Rules {
+	if i := rules.FirstMatch(cfg.Rules, m); i >= 0 {
 		r := &cfg.Rules[i]
-		if !r.Match(m) {
-			continue
-		}
 		rec.Rule = r.Name
 		for _, act := range ruleActions[i] {
-			res := ActionResult{Action: act.Name(), Target: act.Target(), Time: time.Now()}
+			res := store.ActionResult{Action: act.Name(), Target: act.Target(), Time: time.Now()}
 			if err := act.Execute(m); err != nil {
 				res.Error = err.Error()
-				Ev.Add("error", "规则[%s]动作 %s 失败 (UID=%d): %v", r.Name, act.Name(), m.UID, err)
+				events.Add("error", "规则[%s]动作 %s 失败 (UID=%d): %v", r.Name, act.Name(), m.UID, err)
 			} else {
 				res.OK = true
-				Ev.Add("ok", "规则[%s]命中,动作 %s 完成 (UID=%d)", r.Name, act.Name(), m.UID)
+				events.Add("ok", "规则[%s]命中,动作 %s 完成 (UID=%d)", r.Name, act.Name(), m.UID)
 			}
 			rec.Results = append(rec.Results, res)
 		}
-		break // 一封邮件只按第一条命中的规则处理
 	}
 	a.history.Add(rec)
 }
 
 // runWatcherLoop 监督循环:每个邮箱一个监听 goroutine;收到 reload 时
-// 整组停掉,用新配置重建。
+// 整组停掉,用新配置重建。配置无效时挂起等待后台修正。
 func (a *App) runWatcherLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		cfg := a.Config()
 		if err := cfg.Validate(); err != nil {
-			Ev.Add("error", "配置无效,监听暂停: %v", err)
+			events.Add("error", "配置无效,监听暂停: %v", err)
 			select {
 			case <-a.reload: // 后台保存修正后立即恢复
 				continue
@@ -123,11 +141,11 @@ func (a *App) runWatcherLoop(ctx context.Context) {
 				return
 			}
 		}
-		ruleActions := make([][]Action, len(cfg.Rules))
+		ruleActions := make([][]action.Action, len(cfg.Rules))
 		for i := range cfg.Rules {
-			acts, err := buildActions(cfg, &cfg.Rules[i])
+			acts, err := action.Build(cfg, &cfg.Rules[i])
 			if err != nil { // ApplyConfig 已挡过,理论上不会到这
-				Ev.Add("error", "配置错误: %v", err)
+				events.Add("error", "配置错误: %v", err)
 				acts = nil
 			}
 			ruleActions[i] = acts
@@ -146,7 +164,7 @@ func (a *App) runWatcherLoop(ctx context.Context) {
 
 		select {
 		case <-a.reload:
-			Ev.Add("info", "配置已更新,重启所有监听")
+			events.Add("info", "配置已更新,重启所有监听")
 		case <-ctx.Done():
 		}
 		cancel()
@@ -158,10 +176,10 @@ func (a *App) runWatcherLoop(ctx context.Context) {
 }
 
 // watchMailbox 单个邮箱的重连循环(指数退避,稳定运行后重置)。
-func (a *App) watchMailbox(ctx context.Context, cfg *Config, mb *MailboxConfig, ruleActions [][]Action) {
+func (a *App) watchMailbox(ctx context.Context, cfg *config.Config, mb *config.MailboxConfig, ruleActions [][]action.Action) {
 	backoff := 10 * time.Second
 	for ctx.Err() == nil {
-		w := NewWatcher(mb, a.state, func(m *Mail) { a.handleMail(cfg, ruleActions, m) })
+		w := watcher.New(mb, a.state, func(m *mail.Mail) { a.handleMail(cfg, ruleActions, m) })
 		w.OnConnected = func() { a.setConnected(mb.Name, true) }
 		started := time.Now()
 		err := w.Run(ctx)
@@ -172,7 +190,7 @@ func (a *App) watchMailbox(ctx context.Context, cfg *Config, mb *MailboxConfig, 
 		if time.Since(started) > 5*time.Minute {
 			backoff = 10 * time.Second
 		}
-		Ev.Add("warn", "[%s] 连接断开: %v, %s 后重连", mb.Name, err, backoff)
+		events.Add("warn", "[%s] 连接断开: %v, %s 后重连", mb.Name, err, backoff)
 		select {
 		case <-ctx.Done():
 			return
@@ -200,23 +218,24 @@ func main() {
 		fmt.Println(string(h))
 		return
 	}
+	watcher.ClientVersion = version
 
-	cfg, err := LoadConfig(*cfgPath)
+	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		// 解析失败或没有后台可修正时才致命;语义无效则只起后台,监听暂停
 		if cfg == nil || cfg.Admin.Listen == "" {
 			log.Fatalf("加载配置失败: %v", err)
 		}
-		Ev.Add("error", "配置无效: %v —— 监听未启动,请在后台修正并保存", err)
+		events.Add("error", "配置无效: %v —— 监听未启动,请在后台修正并保存", err)
 	}
 
 	dir := filepath.Dir(*cfgPath)
-	Ev.Init(filepath.Join(dir, "events.jsonl"))
+	events.Init(filepath.Join(dir, "events.jsonl"))
 	app := &App{
 		cfgPath:   *cfgPath,
 		cfg:       cfg,
-		state:     LoadState(filepath.Join(dir, "state.json")),
-		history:   LoadHistory(filepath.Join(dir, "history.jsonl")),
+		state:     store.LoadState(filepath.Join(dir, "state.json")),
+		history:   store.LoadHistory(filepath.Join(dir, "history.jsonl")),
 		startAt:   time.Now(),
 		reload:    make(chan struct{}, 1),
 		connected: map[string]bool{},
@@ -225,9 +244,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	Ev.Add("info", "mailwatch %s 启动, %d 个邮箱, %d 条规则", version, len(cfg.Mailboxes), len(cfg.Rules))
+	events.Add("info", "mailwatch %s 启动, %d 个邮箱, %d 条规则", version, len(cfg.Mailboxes), len(cfg.Rules))
 	if cfg.Admin.Listen != "" {
-		go StartAdmin(app)
+		go admin.Start(app)
 	}
 	app.runWatcherLoop(ctx)
 	log.Printf("退出")

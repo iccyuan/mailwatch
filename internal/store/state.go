@@ -1,4 +1,5 @@
-package main
+// Package store 提供持久化:各邮箱 UID 游标与邮件历史。
+package store
 
 import (
 	"encoding/json"
@@ -11,7 +12,7 @@ import (
 type State struct {
 	mu      sync.Mutex
 	path    string
-	LastUID uint32            `json:"last_uid,omitempty"` // 旧版单账户游标,读取时兜底
+	LastUID uint32            `json:"last_uid,omitempty"` // 旧版单账户游标,仅为兼容读取
 	Cursors map[string]uint32 `json:"cursors"`
 }
 

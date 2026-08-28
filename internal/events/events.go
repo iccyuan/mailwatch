@@ -1,4 +1,6 @@
-package main
+// Package events 提供进程内运行事件日志:内存环形缓冲供 Web 后台展示,
+// 同时写标准日志(journald)并可选持久化到 jsonl 文件。
+package events
 
 import (
 	"bytes"
@@ -10,14 +12,14 @@ import (
 	"time"
 )
 
-// Event 运行事件,进内存环形缓冲供 Web 后台展示,同时写标准日志。
+// Event 单条运行事件。
 type Event struct {
 	Time  time.Time `json:"time"`
 	Level string    `json:"level"` // info | ok | warn | error
 	Msg   string    `json:"msg"`
 }
 
-type EventLog struct {
+type logStore struct {
 	mu      sync.Mutex
 	buf     []Event
 	max     int
@@ -25,10 +27,11 @@ type EventLog struct {
 	written int    // 启动以来追加的行数,超阈值触发压缩重写
 }
 
-var Ev = &EventLog{max: 300}
+var std = &logStore{max: 300}
 
 // Init 启用持久化:回载历史事件,之后每条事件追加落盘。
-func (l *EventLog) Init(path string) {
+func Init(path string) {
+	l := std
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.path = path
@@ -53,7 +56,9 @@ func (l *EventLog) Init(path string) {
 	l.rewriteLocked()
 }
 
-func (l *EventLog) Add(level, format string, args ...any) {
+// Add 记录一条事件(level: info/ok/warn/error)。
+func Add(level, format string, args ...any) {
+	l := std
 	msg := fmt.Sprintf(format, args...)
 	log.Printf("[%s] %s", level, msg)
 	l.mu.Lock()
@@ -78,7 +83,22 @@ func (l *EventLog) Add(level, format string, args ...any) {
 	}
 }
 
-func (l *EventLog) rewriteLocked() {
+// Recent 返回最近 n 条(新的在前)。
+func Recent(n int) []Event {
+	l := std
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if n > len(l.buf) {
+		n = len(l.buf)
+	}
+	out := make([]Event, n)
+	for i := 0; i < n; i++ {
+		out[i] = l.buf[len(l.buf)-1-i]
+	}
+	return out
+}
+
+func (l *logStore) rewriteLocked() {
 	if l.path == "" {
 		return
 	}
@@ -92,18 +112,4 @@ func (l *EventLog) rewriteLocked() {
 		os.Rename(tmp, l.path)
 	}
 	l.written = 0
-}
-
-// Recent 返回最近 n 条(新的在前)。
-func (l *EventLog) Recent(n int) []Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if n > len(l.buf) {
-		n = len(l.buf)
-	}
-	out := make([]Event, n)
-	for i := 0; i < n; i++ {
-		out[i] = l.buf[len(l.buf)-1-i]
-	}
-	return out
 }

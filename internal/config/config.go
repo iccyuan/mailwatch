@@ -1,4 +1,5 @@
-package main
+// Package config 定义配置模型与加载/校验/回写。
+package config
 
 import (
 	"bytes"
@@ -50,10 +51,11 @@ type AIConfig struct {
 }
 
 // Rule 一条匹配规则。匹配条件都是"包含即命中",条件留空表示不限。
-// 动作字段(目前只有 forward_to)以后可平行扩展:webhook_url、telegram_chat 等,
-// 在 buildActions 里注册新 Action 即可。
+// 规则从上到下匹配,第一条命中的生效。动作字段(目前只有 forward_to)
+// 以后可平行扩展:webhook_url、telegram_chat 等,在 action.Build 里注册即可。
 type Rule struct {
 	Name           string   `toml:"name" json:"name"`
+	Disabled       bool     `toml:"disabled" json:"disabled"`   // 停用后不参与匹配
 	Mailboxes      []string `toml:"mailboxes" json:"mailboxes"` // 只对这些邮箱生效;空=全部邮箱
 	FromContains   []string `toml:"from_contains" json:"from_contains"`
 	Keywords       []string `toml:"keywords" json:"keywords"`
@@ -70,9 +72,9 @@ type Config struct {
 	Rules      []Rule          `toml:"rules" json:"rules"`
 }
 
-// LoadConfig 解析配置。语义校验失败时仍返回解析出的 cfg(err 非 nil),
+// Load 解析配置。语义校验失败时仍返回解析出的 cfg(err 非 nil),
 // 让调用方可以只起 Web 后台供用户修正,而不是整个进程起不来。
-func LoadConfig(path string) (*Config, error) {
+func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -100,13 +102,10 @@ func (cfg *Config) Validate() error {
 	seen := map[string]bool{}
 	for i := range cfg.Mailboxes {
 		mb := &cfg.Mailboxes[i]
-		cleanIMAP(&mb.IMAPConfig)
+		CleanIMAP(&mb.IMAPConfig)
 		mb.Name = strings.TrimSpace(mb.Name)
 		if mb.Host == "" || mb.User == "" {
 			return fmt.Errorf("邮箱 #%d host/user 未配置", i+1)
-		}
-		if err := checkIMAPHost(&mb.IMAPConfig); err != nil {
-			return fmt.Errorf("邮箱[%s] %w", mb.Name, err)
 		}
 		if mb.Name == "" {
 			mb.Name = mb.User
@@ -117,6 +116,9 @@ func (cfg *Config) Validate() error {
 		seen[mb.Name] = true
 		if mb.Port == 0 {
 			mb.Port = 993
+		}
+		if err := CheckIMAPHost(&mb.IMAPConfig); err != nil {
+			return fmt.Errorf("邮箱[%s] %w", mb.Name, err)
 		}
 		if mb.Folder == "" {
 			mb.Folder = "INBOX"
@@ -157,10 +159,10 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
-// cleanIMAP 清理凭据里的不可见字符:复制粘贴常带首尾空白/换行,
+// CleanIMAP 清理凭据里的不可见字符:复制粘贴常带首尾空白/换行,
 // 会触发 IMAP literal 传输并在部分服务器上引发协议错误。
 // Gmail 应用密码展示时带内部空格,一并去掉。
-func cleanIMAP(c *IMAPConfig) {
+func CleanIMAP(c *IMAPConfig) {
 	c.Host = strings.TrimSpace(c.Host)
 	c.User = strings.TrimSpace(c.User)
 	c.Folder = strings.TrimSpace(c.Folder)
@@ -170,9 +172,9 @@ func cleanIMAP(c *IMAPConfig) {
 	}
 }
 
-// checkIMAPHost 防呆:填成 POP3/SMTP 地址或端口时给出人话提示,
+// CheckIMAPHost 防呆:填成 POP3/SMTP 地址或端口时给出人话提示,
 // 而不是等连接后抛协议解析错误(如 POP3 的 "+OK" 会报 expected CRLF)。
-func checkIMAPHost(c *IMAPConfig) error {
+func CheckIMAPHost(c *IMAPConfig) error {
 	h := strings.ToLower(c.Host)
 	if strings.HasPrefix(h, "pop.") || strings.HasPrefix(h, "pop3.") || c.Port == 995 || c.Port == 110 {
 		return fmt.Errorf("填的是 POP3 服务器(%s:%d),监听需要 IMAP,例如 imap.gmail.com:993", c.Host, c.Port)
@@ -183,8 +185,8 @@ func checkIMAPHost(c *IMAPConfig) error {
 	return nil
 }
 
-// SaveConfig 回写配置文件(机器管理,注释不保留)。
-func SaveConfig(path string, cfg *Config) error {
+// Save 回写配置文件(机器管理,注释不保留)。
+func Save(path string, cfg *Config) error {
 	var buf bytes.Buffer
 	buf.WriteString("# mailwatch 配置 — 由 Web 后台管理,手工注释不会保留\n\n")
 	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {

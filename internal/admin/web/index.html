@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mailwatch 后台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div id="toasts"></div>
+
+<!-- 登录 -->
+<div id="login">
+  <form class="panel" onsubmit="doLogin(event)">
+    <span class="logo">📮</span>
+    <h1>mailwatch</h1>
+    <div class="sub">邮件监听转发 · 管理后台</div>
+    <label>用户名</label>
+    <input type="text" id="lg-user" autocomplete="username" required>
+    <label>密码</label>
+    <input type="password" id="lg-pass" autocomplete="current-password" required>
+    <button class="btn primary" type="submit">登 录</button>
+  </form>
+</div>
+
+<!-- 主界面 -->
+<div id="app"><div class="shell">
+  <aside>
+    <div class="brand"><div class="mark">📮</div><span>mailwatch</span></div>
+    <div class="navi">
+      <button class="item active" data-page="overview" onclick="go(this)">📊 <span class="txt">概览</span></button>
+      <button class="item" data-page="mailboxes" onclick="go(this)">📥 <span class="txt">收信邮箱</span></button>
+      <button class="item" data-page="rules" onclick="go(this)">🎯 <span class="txt">转发规则</span></button>
+      <button class="item" data-page="history" onclick="go(this)">🕘 <span class="txt">邮件历史</span></button>
+      <button class="item" data-page="settings" onclick="go(this)">⚙️ <span class="txt">系统设置</span></button>
+    </div>
+    <div class="side-foot">
+      <div class="side-status"><span class="dot off" id="side-dot"></span><span id="side-conn">…</span></div>
+      <button class="btn" onclick="openPwd()">🔑 修改密码</button>
+      <button class="btn danger" onclick="doLogout()">⏻ 退出登录</button>
+    </div>
+  </aside>
+
+  <main>
+    <!-- 概览 -->
+    <div class="page active" id="page-overview">
+      <div class="pagehead"><h2>概览</h2><span class="desc">运行状态与转发统计</span></div>
+      <div class="stats" id="stats"></div>
+      <div class="card">
+        <h3>📡 邮箱连接状态</h3>
+        <div class="row" id="mb-status" style="margin-top:6px"></div>
+      </div>
+      <div class="card">
+        <h3>🎯 各规则命中</h3>
+        <div id="rule-stats" class="sub" style="margin:8px 0 0"></div>
+      </div>
+      <div class="card span">
+        <h3>📈 近 14 天收转趋势</h3>
+        <div class="chart" id="chart"></div>
+        <div class="legend"><span><i style="background:#c3d1ef"></i>收到</span>
+          <span><i style="background:var(--accent2)"></i>已转发</span></div>
+      </div>
+      <div class="card">
+        <h3>📜 运行日志</h3>
+        <div class="events" id="events"></div>
+      </div>
+    </div>
+
+    <!-- 收信邮箱 -->
+    <div class="page" id="page-mailboxes">
+      <div class="pagehead"><h2>收信邮箱</h2><span class="desc">被监听的邮箱账户,可添加多个</span>
+        <button class="btn primary save" onclick="saveConfig()">💾 保存并应用</button></div>
+      <div id="mailboxes"></div>
+      <button class="btn addbtn" onclick="addMailbox()">＋ 添加监听邮箱</button>
+    </div>
+
+    <!-- 规则 -->
+    <div class="page" id="page-rules">
+      <div class="pagehead"><h2>转发规则</h2><span class="desc">「包含即命中」无需正则;从上到下匹配,第一条命中生效</span>
+        <button class="btn primary save" onclick="saveConfig()">💾 保存并应用</button></div>
+      <div class="card">
+        <h3>✨ 智能创建</h3>
+        <div class="sub">用一句话描述,AI 自动生成规则</div>
+        <div class="row">
+          <input type="text" id="ai-desc" placeholder="例:把 boss@qq.com 发来的含「发票」的邮件转到 me@163.com" style="flex:1;min-width:240px">
+          <button class="btn primary" id="ai-btn" onclick="aiRule()">生成规则</button>
+        </div>
+        <div class="hint" id="ai-hint"></div>
+      </div>
+      <div id="rules"></div>
+      <button class="btn addbtn" onclick="addRule()">＋ 添加规则</button>
+      <div class="card" style="margin-top:18px">
+        <h3>🧪 规则测试器</h3>
+        <div class="sub">填一封示例邮件,看会命中哪条规则(测试当前编辑中的规则,无需先保存)</div>
+        <div class="grid2">
+          <div><label>来源邮箱</label><select id="t-mailbox"></select></div>
+          <div><label>发件人</label><input type="text" id="t-from" placeholder="boss@qq.com"></div>
+        </div>
+        <div class="grid2">
+          <div><label>主题</label><input type="text" id="t-subject" placeholder="10月发票"></div>
+          <div><label>正文(可选)</label><input type="text" id="t-body"></div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" onclick="testRule()">测试匹配</button>
+          <button class="btn primary" id="e2e-btn" onclick="testE2E()">🚀 真实转发测试</button>
+          <span id="t-result"></span>
+        </div>
+        <div class="hint">「测试匹配」只做规则演练(用当前编辑中的规则);「真实转发测试」用<b>已保存</b>的配置走完整链路:规则匹配 → SMTP 真实发信到命中规则的转发目标</div>
+        <div id="e2e-result"></div>
+      </div>
+    </div>
+
+    <!-- 历史 -->
+    <div class="page" id="page-history">
+      <div class="pagehead"><h2>邮件历史</h2><span class="desc">收到的邮件、内容与送达情况</span></div>
+      <div class="card">
+        <div class="row" style="margin-bottom:12px">
+          <select id="h-mailbox" style="max-width:170px" onchange="hOffset=0;loadHistory()"></select>
+          <input type="text" id="hq" placeholder="搜索发件人 / 主题…" style="max-width:260px"
+            onkeydown="if(event.key==='Enter'){hOffset=0;loadHistory()}">
+          <button class="btn" onclick="hOffset=0;loadHistory()">搜索</button>
+          <div style="flex:1"></div>
+          <span class="hint" id="h-total"></span>
+        </div>
+        <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th style="width:125px">时间</th><th style="width:110px">邮箱</th><th>发件人</th><th>主题</th>
+            <th style="width:88px">规则</th><th style="width:88px">送达</th></tr></thead>
+          <tbody id="h-body"></tbody>
+        </table>
+        </div>
+        <div class="pager">
+          <button class="btn" onclick="hPage(-1)">‹ 上一页</button>
+          <span id="h-page">1</span>
+          <button class="btn" onclick="hPage(1)">下一页 ›</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 设置 -->
+    <div class="page" id="page-settings">
+      <div class="pagehead"><h2>系统设置</h2><span class="desc">发信、AI 与账户</span>
+        <button class="btn primary save" onclick="saveConfig()">💾 保存并应用</button></div>
+      <div class="card">
+        <h3>📤 转发发信 (SMTP)</h3>
+        <div class="sub">转发邮件用的发信账号</div>
+        <div class="row" style="margin-bottom:4px"><button class="btn" onclick="copyFromIMAP()">⇩ 同第一个收信邮箱</button></div>
+        <div class="grid2">
+          <div><label>邮箱账号</label><input type="text" id="s-user" placeholder="输入后自动识别服务商"></div>
+          <div><label>密码 / 授权码</label><input type="password" id="s-pass"></div>
+          <div><label>服务器</label><input type="text" id="s-host" list="smtp-hosts"></div>
+          <div><label>端口</label><input type="number" id="s-port" placeholder="465"></div>
+          <div><label>发件地址(默认同账号)</label><input type="text" id="s-from"></div>
+        </div>
+        <div class="hint" id="s-tip"></div>
+        <datalist id="smtp-hosts"><option value="smtp.qq.com"><option value="smtp.163.com"><option value="smtp.126.com"><option value="smtp.gmail.com"><option value="smtp.office365.com"><option value="smtp.aliyun.com"><option value="smtp.sina.com"><option value="smtp.mail.me.com"></datalist>
+        <label class="switch"><input type="checkbox" id="s-ssl"> SSL 直连(465 端口勾选;587 STARTTLS 不勾)</label>
+        <div class="row" style="margin-top:14px">
+          <button class="btn" id="ts-btn" onclick="testSMTP('')">🔌 测试发信认证</button>
+          <input type="text" id="ts-to" placeholder="收一封测试邮件的地址(可选)" style="max-width:260px">
+          <button class="btn" onclick="testSMTP(document.getElementById('ts-to').value)">✉️ 发测试邮件</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🤖 AI 助手(可选)</h3>
+        <div class="sub">OpenAI 兼容接口,供「智能创建规则」用;本机 litellm 可填 http://127.0.0.1:8000/v1</div>
+        <div class="grid2">
+          <div><label>Base URL</label><input type="text" id="a-url" placeholder="http://127.0.0.1:8000/v1"></div>
+          <div><label>模型</label><input type="text" id="a-model" placeholder="如 claude-sonnet-5"></div>
+        </div>
+        <label>API Key</label><input type="password" id="a-key">
+      </div>
+      <div class="card">
+        <h3>ℹ️ 关于</h3>
+        <div class="sub" id="about" style="margin:6px 0 0">mailwatch</div>
+      </div>
+    </div>
+  </main>
+</div></div>
+
+<!-- 邮件详情 -->
+<div class="modal" id="m-mail" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="box">
+    <h3 id="md-subject"></h3>
+    <div class="kv">
+      <span class="k">来源邮箱</span><span id="md-mailbox"></span>
+      <span class="k">发件人</span><span id="md-from"></span>
+      <span class="k">时间</span><span id="md-time"></span>
+      <span class="k">规则</span><span id="md-rule"></span>
+    </div>
+    <div id="md-deliv"></div>
+    <label style="margin-top:14px">正文</label>
+    <pre class="mailbody" id="md-body"></pre>
+    <div class="row" style="margin-top:16px;justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('m-mail').classList.remove('open')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改密码 -->
+<div class="modal" id="m-pwd" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="box" style="max-width:380px">
+    <h3>修改后台密码</h3>
+    <label>原密码</label><input type="password" id="p-old">
+    <label>新密码(至少 6 位)</label><input type="password" id="p-new">
+    <div class="row" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('m-pwd').classList.remove('open')">取消</button>
+      <button class="btn primary" onclick="changePwd()">确定</button>
+    </div>
+  </div>
+</div>
+
+<datalist id="imap-hosts"><option value="imap.qq.com"><option value="imap.163.com"><option value="imap.126.com"><option value="imap.gmail.com"><option value="outlook.office365.com"><option value="imap.aliyun.com"><option value="imap.sina.com"><option value="imap.mail.me.com"></datalist>
+
+<script src="/static/app.js" defer></script>
+</body>
+</html>

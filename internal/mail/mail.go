@@ -1,4 +1,5 @@
-package main
+// Package mail 定义解析后的邮件模型,并从 RFC822 原始字节解析。
+package mail
 
 import (
 	"bytes"
@@ -27,8 +28,8 @@ type Mail struct {
 
 var htmlTagRe = regexp.MustCompile(`(?s)<style.*?</style>|<script.*?</script>|<[^>]+>`)
 
-// ParseMail 从原始字节解析出头部与文本正文。解析失败不致命,能填多少填多少。
-func ParseMail(uid uint32, raw []byte) *Mail {
+// Parse 从原始字节解析出头部与文本正文。解析失败不致命,能填多少填多少。
+func Parse(uid uint32, raw []byte) *Mail {
 	m := &Mail{UID: uid, Raw: raw}
 	mr, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil {

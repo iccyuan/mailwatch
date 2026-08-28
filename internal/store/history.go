@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"bufio"
@@ -154,7 +154,7 @@ func (h *History) Get(id int64) *MailRecord {
 	return nil
 }
 
-// Stats 统计面板数据:累计/今日计数、近 14 天每日收转、各规则命中数。
+// Stats 统计面板数据:累计/今日计数、近 14 天每日收转、各规则命中数、各邮箱收信量。
 func (h *History) Stats() map[string]any {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -214,23 +214,23 @@ func (h *History) Stats() map[string]any {
 			}
 		}
 	}
-	type ruleStat struct {
+	type nameCount struct {
 		Name  string `json:"name"`
 		Count int    `json:"count"`
 	}
-	var rules []ruleStat
+	var rules []nameCount
 	for name, c := range ruleCount {
-		rules = append(rules, ruleStat{name, c})
+		rules = append(rules, nameCount{name, c})
 	}
 	if rules == nil {
-		rules = []ruleStat{}
+		rules = []nameCount{}
 	}
-	var mailboxes []ruleStat
+	var mailboxes []nameCount
 	for name, c := range mboxCount {
-		mailboxes = append(mailboxes, ruleStat{name, c})
+		mailboxes = append(mailboxes, nameCount{name, c})
 	}
 	if mailboxes == nil {
-		mailboxes = []ruleStat{}
+		mailboxes = []nameCount{}
 	}
 	return map[string]any{
 		"total": total, "matched": matched, "delivered": delivered, "failed": failed,

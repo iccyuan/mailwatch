@@ -1,4 +1,4 @@
-package main
+package action
 
 import (
 	"crypto/tls"
@@ -9,30 +9,32 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	"mailwatch/internal/config"
+	"mailwatch/internal/mail"
 )
 
-// ForwardAction 把邮件经 SMTP 转发到目标邮箱:正文为原文摘要,
-// attachOriginal 时把原始邮件附为 .eml(默认不附)。
-type ForwardAction struct {
-	smtp           *SMTPConfig
-	to             []string
-	attachOriginal bool
+// Forward 把邮件经 SMTP 转发到目标邮箱:正文为原文摘要,
+// AttachOriginal 时把原始邮件附为 .eml(默认不附)。
+type Forward struct {
+	SMTP           *config.SMTPConfig
+	To             []string
+	AttachOriginal bool
 }
 
-func (a *ForwardAction) Name() string   { return "forward" }
-func (a *ForwardAction) Target() string { return strings.Join(a.to, ", ") }
+func (a *Forward) Name() string   { return "forward" }
+func (a *Forward) Target() string { return strings.Join(a.To, ", ") }
 
-func (a *ForwardAction) Execute(m *Mail) error {
-	msg := a.buildMessage(m)
-	return sendSMTP(a.smtp, a.to, msg)
+func (a *Forward) Execute(m *mail.Mail) error {
+	return SendMail(a.SMTP, a.To, a.buildMessage(m))
 }
 
-func (a *ForwardAction) buildMessage(m *Mail) []byte {
+func (a *Forward) buildMessage(m *mail.Mail) []byte {
 	boundary := fmt.Sprintf("mailwatch-%d-%d", m.UID, time.Now().UnixNano())
 	subject := mime.BEncoding.Encode("UTF-8", "Fwd: "+m.Subject)
 
 	noBodyHint := "(无文本正文)"
-	if a.attachOriginal {
+	if a.AttachOriginal {
 		noBodyHint = "(无文本正文,见附件原始邮件)"
 	}
 	summary := fmt.Sprintf(
@@ -41,12 +43,12 @@ func (a *ForwardAction) buildMessage(m *Mail) []byte {
 
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\r\n", args...) }
-	w("From: %s", a.smtp.From)
-	w("To: %s", strings.Join(a.to, ", "))
+	w("From: %s", a.SMTP.From)
+	w("To: %s", strings.Join(a.To, ", "))
 	w("Subject: %s", subject)
 	w("Date: %s", time.Now().Format(time.RFC1123Z))
 	w("MIME-Version: 1.0")
-	if !a.attachOriginal {
+	if !a.AttachOriginal {
 		w("Content-Type: text/plain; charset=utf-8")
 		w("Content-Transfer-Encoding: base64")
 		w("")
@@ -88,8 +90,8 @@ func orDefault(s, def string) string {
 	return s
 }
 
-// connectSMTP 建连 + TLS + 认证,后台"测试发信"也复用。
-func connectSMTP(cfg *SMTPConfig) (*smtp.Client, error) {
+// ConnectSMTP 建连 + TLS + 认证。后台"测试发信"也复用。
+func ConnectSMTP(cfg *config.SMTPConfig) (*smtp.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprint(cfg.Port))
 	dialer := &net.Dialer{Timeout: 30 * time.Second}
 
@@ -126,8 +128,9 @@ func connectSMTP(cfg *SMTPConfig) (*smtp.Client, error) {
 	return c, nil
 }
 
-func sendSMTP(cfg *SMTPConfig, rcpts []string, msg []byte) error {
-	c, err := connectSMTP(cfg)
+// SendMail 经配置的 SMTP 账号发送一封已构造好的邮件。
+func SendMail(cfg *config.SMTPConfig, rcpts []string, msg []byte) error {
+	c, err := ConnectSMTP(cfg)
 	if err != nil {
 		return err
 	}

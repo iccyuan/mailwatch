@@ -1,4 +1,5 @@
-package main
+// Package watcher 维持单个邮箱的 IMAP 连接与增量拉取。
+package watcher
 
 import (
 	"context"
@@ -8,20 +9,28 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+
+	"mailwatch/internal/config"
+	"mailwatch/internal/events"
+	"mailwatch/internal/mail"
+	"mailwatch/internal/store"
 )
+
+// ClientVersion 发给 IMAP ID 命令的版本号,由 main 注入。
+var ClientVersion = "dev"
 
 // Watcher 维持一个邮箱的 IMAP 连接:IDLE 实时感知新邮件(服务器不支持则退回纯轮询),
 // 每轮用 UID SEARCH 拉增量,逐封回调 handle。多个邮箱各自持有一个 Watcher。
 type Watcher struct {
-	mb     *MailboxConfig
-	state  *State
-	handle func(m *Mail)
+	mb     *config.MailboxConfig
+	state  *store.State
+	handle func(m *mail.Mail)
 	wake   chan struct{}
 
 	OnConnected func() // 连接就绪回调(可选),供状态上报
 }
 
-func NewWatcher(mb *MailboxConfig, state *State, handle func(m *Mail)) *Watcher {
+func New(mb *config.MailboxConfig, state *store.State, handle func(m *mail.Mail)) *Watcher {
 	return &Watcher{mb: mb, state: state, handle: handle, wake: make(chan struct{}, 1)}
 }
 
@@ -51,7 +60,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	}
 	// 网易(163/126)等 Coremail 服务器要求登录后发 ID,否则 SELECT 报 Unsafe Login
 	if c.Caps().Has(imap.CapID) {
-		_, _ = c.ID(&imap.IDData{Name: "mailwatch", Version: version}).Wait()
+		_, _ = c.ID(&imap.IDData{Name: "mailwatch", Version: ClientVersion}).Wait()
 	}
 	sel, err := c.Select(mb.Folder, nil).Wait()
 	if err != nil {
@@ -66,7 +75,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	useIdle := mb.Idle && c.Caps().Has(imap.CapIdle)
 	poll := time.Duration(mb.PollIntervalSec) * time.Second
-	Ev.Add("ok", "[%s] IMAP 已连接 %s folder=%s idle=%v poll=%s", mb.Name, mb.Host, mb.Folder, useIdle, poll)
+	events.Add("ok", "[%s] IMAP 已连接 %s folder=%s idle=%v poll=%s", mb.Name, mb.Host, mb.Folder, useIdle, poll)
 	if w.OnConnected != nil {
 		w.OnConnected()
 	}
@@ -157,7 +166,7 @@ func (w *Watcher) fetchOne(c *imapclient.Client, uid imap.UID) error {
 		log.Printf("[%s] UID %d 无正文数据,跳过", w.mb.Name, uid)
 		return nil
 	}
-	m := ParseMail(uint32(uid), raw)
+	m := mail.Parse(uint32(uid), raw)
 	m.Mailbox = w.mb.Name
 	w.handle(m)
 
