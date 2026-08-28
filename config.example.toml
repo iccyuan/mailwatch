@@ -1,0 +1,45 @@
+# mailwatch 配置示例。复制为 config.toml 后填入真实凭据(config.toml 不进仓库)。
+#
+# 常见服务商:
+#   QQ邮箱:  imap.qq.com / smtp.qq.com,密码用「授权码」(设置→账户→开启IMAP/SMTP)
+#   163邮箱: imap.163.com / smtp.163.com,同样用授权码
+#   Gmail:   imap.gmail.com / smtp.gmail.com,用 App Password
+
+# 被监听的邮箱,可配多个 [[mailboxes]](旧版单账户 [imap] 段会自动迁移)
+[[mailboxes]]
+name = "主邮箱"             # 展示名,规则里可用它限定生效范围
+host = "imap.qq.com"
+port = 993
+user = "watch@example.com"
+password = "授权码"
+folder = "INBOX"
+idle = true                 # IMAP IDLE 实时推送;服务器不支持时自动退回轮询
+poll_interval_sec = 300     # IDLE 模式下的兜底刷新周期;纯轮询模式下的轮询间隔
+mark_seen = false           # 转发后是否把原邮件标记为已读
+
+[smtp]                      # 转发用的发信账号(通常就是同一个邮箱)
+host = "smtp.qq.com"
+port = 465
+ssl = true                  # true=SMTPS(465), false=STARTTLS(587)
+user = "watch@example.com"
+password = "授权码"
+# from = "watch@example.com"  # 默认同 user
+
+[admin]                     # Web 管理后台;listen 留空则不启动
+listen = "127.0.0.1:6100"   # 只绑本机,公网经 Caddy HTTPS 反代
+username = "admin"
+password_hash = ""          # ./mailwatch -hash '你的密码' 生成
+
+[ai]                        # 可选:后台「AI 生成规则」用,OpenAI 兼容接口
+base_url = ""               # 如 http://127.0.0.1:8000/v1 (litellm)
+api_key = ""
+model = ""
+
+# 规则可写多条,一封邮件按第一条命中的规则处理
+[[rules]]
+name = "示例规则"
+mailboxes = []                        # 只对这些监听邮箱生效(填 name);留空=全部邮箱
+from_contains = ["boss@company.com"]  # 发件人(地址或显示名)包含任一子串;留空=任意发件人
+keywords = ["发票", "报销"]           # 主题或正文包含任一关键词;留空=全部转发
+forward_to = ["me@example.com"]       # 转发目标,可多个
+attach_original = false               # 转发时是否附带原始邮件 .eml,默认否

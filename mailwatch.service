@@ -1,0 +1,14 @@
+[Unit]
+Description=mailwatch - IMAP mail watcher and forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/project/mailwatch
+ExecStart=/mnt/project/mailwatch/mailwatch -c /mnt/project/mailwatch/config.toml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

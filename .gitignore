@@ -1,0 +1,9 @@
+config.toml
+state.json
+history.jsonl
+events.jsonl
+mailwatch-linux-amd64
+mailwatch
+mailwatch.new
+*.exe
+*.log
