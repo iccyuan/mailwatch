@@ -100,7 +100,7 @@ async function loadHistory(){try{
   hTotal=d.total;
   $('h-total').textContent=`共 ${d.total} 封`;
   $('h-page').textContent=(hOffset/50+1)+' / '+Math.max(1,Math.ceil(d.total/50));
-  $('h-body').innerHTML=d.items.length?d.items.map(r=>`<tr onclick="openMail(${r.id})">
+  $('h-body').innerHTML=d.items.length?d.items.map(r=>`<tr onclick="openMail('${r.id}')">
       <td>${new Date(r.time).toLocaleString()}</td>
       <td class="ellip" style="max-width:110px">${esc(r.mailbox||'—')}</td>
       <td class="ellip" style="max-width:170px">${esc(r.from||r.from_addr)}</td>

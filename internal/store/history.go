@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,20 @@ const (
 	historyCompact = 10000 // 超过该条数触发压缩
 	bodyCap        = 32 << 10
 )
+
+// ID64 历史记录 ID(纳秒时间戳)。int64 超出 JS 安全整数范围(2^53),
+// 直接以数字进 JSON 会在前端丢精度,所以序列化为字符串;读取兼容旧的数字格式。
+type ID64 int64
+
+func (v ID64) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + strconv.FormatInt(int64(v), 10) + `"`), nil
+}
+
+func (v *ID64) UnmarshalJSON(b []byte) error {
+	n, err := strconv.ParseInt(strings.Trim(string(b), `"`), 10, 64)
+	*v = ID64(n)
+	return err
+}
 
 // ActionResult 单个动作的送达情况。
 type ActionResult struct {
@@ -27,7 +42,7 @@ type ActionResult struct {
 
 // MailRecord 一封已处理邮件的完整记录(含正文,供后台查看)。
 type MailRecord struct {
-	ID       int64          `json:"id"`
+	ID       ID64           `json:"id"`
 	Time     time.Time      `json:"time"`
 	UID      uint32         `json:"uid"`
 	Mailbox  string         `json:"mailbox"` // 来源邮箱
@@ -147,7 +162,7 @@ func (h *History) Get(id int64) *MailRecord {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for i := len(h.recs) - 1; i >= 0; i-- {
-		if h.recs[i].ID == id {
+		if int64(h.recs[i].ID) == id {
 			return h.recs[i]
 		}
 	}
