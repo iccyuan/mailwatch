@@ -2,6 +2,7 @@
 package admin
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -93,7 +94,10 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, _ := webFS.ReadFile("web/index.html")
+	// 静态资源 URL 注入版本号做缓存失效:升级后浏览器自动拉新资源
+	data = bytes.ReplaceAll(data, []byte("{{v}}"), []byte(s.app.Version()))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(data)
 }
 

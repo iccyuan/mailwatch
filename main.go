@@ -26,7 +26,7 @@ import (
 	"mailwatch/internal/watcher"
 )
 
-var version = "0.1.9"
+var version = "0.1.10"
 
 // App 持有当前配置与运行状态,是 admin.Backend 的实现。
 // Web 后台改配置后通过 reload 通道热重启监听。
